@@ -25,7 +25,9 @@ import java.util.EnumSet;
 import com.google.zxing.BarcodeFormat;
 import com.google.zxing.BinaryBitmap;
 import com.google.zxing.DecodeHintType;
+import com.google.zxing.LuminanceSource;
 import com.google.zxing.MultiFormatReader;
+import com.google.zxing.NotFoundException;
 import com.google.zxing.PlanarYUVLuminanceSource;
 import com.google.zxing.Result;
 import com.google.zxing.common.HybridBinarizer;
@@ -322,24 +324,38 @@ class RCTCameraViewFinder extends TextureView implements TextureView.SurfaceText
                 imageData = rotated;
             }
 
+            PlanarYUVLuminanceSource source = new PlanarYUVLuminanceSource(imageData, width, height, 0, 0, width, height, false);
             try {
-                PlanarYUVLuminanceSource source = new PlanarYUVLuminanceSource(imageData, width, height, 0, 0, width, height, false);
                 BinaryBitmap bitmap = new BinaryBitmap(new HybridBinarizer(source));
                 Result result = _multiFormatReader.decodeWithState(bitmap);
+                sendEvent(result);
 
-                ReactContext reactContext = RCTCameraModule.getReactContextSingleton();
-                WritableMap event = Arguments.createMap();
-                event.putString("data", result.getText());
-                event.putString("type", result.getBarcodeFormat().toString());
-                reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class).emit("CameraBarCodeReadAndroid", event);
+            } catch (NotFoundException e) {
+                try {
+                    // invert image and try again
+                    LuminanceSource invertedSource = source.invert();
+                    BinaryBitmap bitmap = new BinaryBitmap(new HybridBinarizer(invertedSource));
+                    Result result = _multiFormatReader.decodeWithState(bitmap);
+                    sendEvent(result);
 
+                } catch (Throwable t) {
+                    // continue
+                }
             } catch (Throwable t) {
                 // meh
             } finally {
                 _multiFormatReader.reset();
                 RCTCameraViewFinder.barcodeScannerTaskLock = false;
-                return null;
             }
+            return null;
+        }
+
+        private void sendEvent(Result result) {
+            ReactContext reactContext = RCTCameraModule.getReactContextSingleton();
+            WritableMap event = Arguments.createMap();
+            event.putString("data", result.getText());
+            event.putString("type", result.getBarcodeFormat().toString());
+            reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class).emit("CameraBarCodeReadAndroid", event);
         }
     }
 
